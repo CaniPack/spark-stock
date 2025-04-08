@@ -1,0 +1,133 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
+// enough when changing adapters.
+// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+datasource db {
+  provider = "sqlite"
+  url      = "file:dev.sqlite"
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+}
+
+// Enum definitions for configuration options
+
+enum PreorderPaymentType {
+  FULL // Pago completo estándar
+  PARTIAL_PERCENTAGE // Porcentaje del total
+  PARTIAL_FIXED // Monto fijo
+}
+
+enum TermsDisplayType {
+  INLINE // Mostrar directamente en la página
+  POPUP // Mostrar en un modal/popup
+}
+
+enum WarrantyPresentation {
+  POPUP // Ofrecer en un modal al añadir al carrito
+  EMBED // Ofrecer como elemento embebido en la página
+}
+
+enum WarrantyPriceType {
+  GLOBAL_PERCENTAGE // Usa el porcentaje global de la tienda
+  PRODUCT_PERCENTAGE // Usa un porcentaje específico para este producto
+  PRODUCT_FIXED // Usa un precio fijo específico para este producto
+}
+
+enum SubscriptionStatus {
+  PENDING // Esperando notificación
+  NOTIFIED // Notificación enviada
+  ERROR // Error al notificar
+}
+
+// Global settings for the shop
+model ShopSettings {
+  id                         Int      @id @default(autoincrement())
+  shop                       String   @unique // Shop domain (e.g., my-store.myshopify.com)
+  warrantyEnabled            Boolean  @default(false)
+  warrantyDefaultPresentation WarrantyPresentation? @default(POPUP)
+  warrantyDefaultPercentage  Float?   @default(10.0) // Default percentage if type is GLOBAL_PERCENTAGE
+  warrantyGlobalDescription  String?  // Default description shown in offer
+  warrantyProductId          String?  // GID of the main "Warranty" product in Shopify
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Configuration specific to each product
+model ProductConfiguration {
+  id                          Int      @id @default(autoincrement())
+  shop                        String   // Shop domain
+  productId                   String   // Shopify Product GID (e.g., gid://shopify/Product/123456)
+
+  // --- "Sin Stock" Feature ---
+  noStockEnabled              Boolean  @default(false)
+  noStockButtonText           String?
+  noStockButtonColor          String?  // Store as hex color code (e.g., "#FF0000")
+  noStockNotifyFormEnabled    Boolean  @default(true)
+  noStockTimerEnabled         Boolean  @default(false)
+  noStockRestockDate          DateTime?
+  noStockRecommendationsEnabled Boolean @default(false)
+  noStockRecommendedProductGids String?  // Comma-separated list of recommended Product GIDs
+
+  // --- "Preventa" Feature ---
+  preorderEnabled             Boolean  @default(false)
+  preorderButtonText          String?
+  preorderButtonColor         String?
+  preorderEndDate             DateTime?
+  preorderPaymentType         PreorderPaymentType? @default(FULL)
+  preorderPartialPaymentValue Float?   // Percentage (e.g., 30.0) or fixed amount
+  preorderTerms               String?  // Text/HTML for terms and conditions
+  preorderTermsDisplay        TermsDisplayType? @default(INLINE)
+
+  // --- "Garantía Upsell" Feature ---
+  warrantyEnabledOverride     Boolean? // Null = use global ShopSetting, true/false = override for this product
+  warrantyPresentationOverride WarrantyPresentation? // Null = use global, specific value = override
+  warrantyPriceType           WarrantyPriceType? @default(GLOBAL_PERCENTAGE)
+  warrantyPriceValue          Float?   // Specific percentage or fixed amount if type is PRODUCT_*
+  warrantyVariantId           String?  // GID of the specific warranty ProductVariant for this product
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shop, productId]) // Ensure only one config per product per shop
+  @@index([shop])
+  @@index([productId])
+}
+
+// Subscriptions for "Back in Stock" notifications
+model BackInStockSubscription {
+  id             Int      @id @default(autoincrement())
+  shop           String   // Shop domain
+  productId      String   // Product GID being watched
+  customerEmail  String
+  customerName   String?
+  customerPhone  String?  // Optional phone number
+  subscribedAt   DateTime @default(now())
+  notifiedAt     DateTime?
+  status         SubscriptionStatus @default(PENDING)
+
+  @@index([shop, productId, status]) // Index for finding pending subscriptions for a product
+  @@index([customerEmail])
+}
