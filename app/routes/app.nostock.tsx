@@ -71,7 +71,54 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 };
 
-// TODO: Implement action to save configuration
+// Type for a single Metafield input object
+type MetafieldInput = {
+  namespace: string;
+  key: string;
+  value: string;
+  type: string;
+};
+
+// Type for the productUpdate mutation response data
+type ProductUpdateResponse = {
+  data?: {
+    productUpdate?: {
+      product?: {
+        id: string;
+        // Include metafields confirmation if needed
+      };
+      userErrors: { field: string[]; message: string }[];
+    };
+  };
+  errors?: any[]; // Generic GraphQL errors
+};
+
+// GraphQL Mutation to update product metafields
+const PRODUCT_UPDATE_METAFIELDS_MUTATION = `
+  mutation productUpdate($input: ProductInput!) {
+    productUpdate(input: $input) {
+      product {
+        id
+        metafields(first: 10, namespace: "spark_stock") { # Fetch recently set metafields for confirmation
+          edges {
+            node {
+              id
+              namespace
+              key
+              value
+            }
+          }
+        }
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+// Action: Save configuration to the database AND Shopify Metafields
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const formData = await request.formData();
@@ -109,19 +156,103 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   };
 
   console.log("[Action] Attempting to save config for product:", productId);
-  console.log("[Action] Data to save:", JSON.stringify(configData, null, 2)); // Log the exact data
+  console.log("[Action] Data to save (Prisma):", JSON.stringify(configData, null, 2));
 
+  // --- Prepare Metafields for Shopify --- //
+  const metafieldsToSet: MetafieldInput[] = [];
+  const appNamespace = "spark_stock";
+
+  // Helper now uses the MetafieldInput type implicitly through array push
+  const addMetafield = (key: string, value: any, type: string) => {
+    if (value !== null && value !== undefined) {
+      let stringValue = String(value);
+      if (type === "boolean") { stringValue = value ? "true" : "false"; }
+      else if (type === "date_time" && value instanceof Date) { stringValue = value.toISOString(); }
+
+      if (stringValue !== '' || type === 'boolean' || type === 'date_time') {
+         metafieldsToSet.push({
+            namespace: appNamespace,
+            key: key,
+            value: stringValue,
+            type: type,
+         });
+      }
+    }
+     // TODO: Handle resetting/deleting metafields if needed
+  };
+
+  // Add metafields based on configData
+  addMetafield("no_stock_enabled", configData.noStockEnabled, "boolean");
+  addMetafield("no_stock_button_text", configData.noStockButtonText, "single_line_text_field");
+  addMetafield("no_stock_button_color", configData.noStockButtonColor, "single_line_text_field");
+  addMetafield("no_stock_notify_form", configData.noStockNotifyFormEnabled, "boolean");
+  addMetafield("no_stock_timer", configData.noStockTimerEnabled, "boolean");
+  addMetafield("no_stock_restock_date", configData.noStockRestockDate, "date_time");
+  addMetafield("no_stock_recommendations", configData.noStockRecommendationsEnabled, "boolean");
+  addMetafield("no_stock_rec_gids", configData.noStockRecommendedProductGids, "single_line_text_field");
+
+  console.log("[Action] Metafields prepared:", JSON.stringify(metafieldsToSet, null, 2));
+
+  // --- Save to Prisma and Shopify --- //
   try {
-    const result = await prisma.productConfiguration.upsert({
+    // 1. Save to Prisma (provides fallback and easy querying)
+    const prismaResult = await prisma.productConfiguration.upsert({
       where: { shop_productId: { shop: session.shop, productId: productId } },
       update: configData,
       create: configData,
     });
-    console.log("[Action] Prisma upsert successful! Result ID:", result.id); // Log success and ID
+    console.log("[Action] Prisma upsert successful! ID:", prismaResult.id);
+
+    // 2. Save to Shopify Metafields
+    if (metafieldsToSet.length > 0) {
+        console.log("[Action] Calling Shopify productUpdate mutation...");
+        const productInput = {
+            id: productId,
+            metafields: metafieldsToSet,
+        };
+        // Call GraphQL without generic type
+        const apiResponse = await admin.graphql(
+            PRODUCT_UPDATE_METAFIELDS_MUTATION,
+            { variables: { input: productInput } }
+        );
+
+        // Check HTTP status first
+        if (!apiResponse.ok) {
+            let errorDetails = `Request failed with status ${apiResponse.status}`;
+            try { errorDetails = await apiResponse.text(); } catch {}
+            console.error(`[Action] Shopify productUpdate HTTP Error: ${apiResponse.status}`, errorDetails);
+            throw new Error(`Shopify API request failed with status ${apiResponse.status}`);
+        }
+
+        // Parse JSON and apply type
+        const responseJson: ProductUpdateResponse = await apiResponse.json();
+
+        // Check specifically for GraphQL userErrors in the response data
+        const userErrors = responseJson.data?.productUpdate?.userErrors;
+
+        if (userErrors && userErrors.length > 0) {
+            console.error("[Action] Shopify productUpdate userErrors:", userErrors);
+            // Define type for error object 'e'
+            const errorMessages = userErrors.map((e: { message: string }) => e.message).join(', ');
+            throw new Error(`Shopify API Error: ${errorMessages}`);
+        }
+
+        // Check for general GraphQL errors (less common if userErrors is empty)
+        if (responseJson.errors) {
+             console.error("[Action] Shopify GraphQL general errors:", responseJson.errors);
+             throw new Error(`Shopify GraphQL Error: ${JSON.stringify(responseJson.errors)}`);
+        }
+
+        console.log("[Action] Shopify productUpdate successful!");
+    } else {
+        console.log("[Action] No metafields to set for Shopify.");
+        // Potentially call metafieldDelete here if inputs were cleared?
+    }
+
     return json({ success: true });
+
   } catch (error: any) {
-    console.error("[Action] Prisma upsert failed:", error);
-    // Log the specific Prisma error if available
+    console.error("[Action] Save failed (Prisma or Shopify):", error);
     const errorMessage = error.message || "Failed to save configuration";
     return json({ error: errorMessage }, { status: 500 });
   }

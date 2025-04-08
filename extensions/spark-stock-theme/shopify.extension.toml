@@ -1,0 +1,9 @@
+name = "Spark Stock Theme"
+type = "theme"
+
+# Defines the entry points for the theme extension
+[[blocks]]
+name = "Spark Stock - Sin Stock"
+target = "section"
+path = "blocks/star_rating.liquid"
+

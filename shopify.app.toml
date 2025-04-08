@@ -3,7 +3,7 @@
 client_id = "d1d22bd8940e0e7dc2831bd4579310ed"
 name = "Spark Stock"
 handle = "spark-stock"
-application_url = "https://islamic-leads-outline-wide.trycloudflare.com"
+application_url = "https://opera-quantitative-drain-gem.trycloudflare.com"
 embedded = true
 
 [build]
@@ -27,9 +27,9 @@ scopes = "write_products"
 
 [auth]
 redirect_urls = [
-  "https://islamic-leads-outline-wide.trycloudflare.com/auth/callback",
-  "https://islamic-leads-outline-wide.trycloudflare.com/auth/shopify/callback",
-  "https://islamic-leads-outline-wide.trycloudflare.com/api/auth/callback"
+  "https://opera-quantitative-drain-gem.trycloudflare.com/auth/callback",
+  "https://opera-quantitative-drain-gem.trycloudflare.com/auth/shopify/callback",
+  "https://opera-quantitative-drain-gem.trycloudflare.com/api/auth/callback"
 ]
 
 [pos]
